@@ -1,0 +1,1 @@
+npx tsx src/cli.ts run workout-week

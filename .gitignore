@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+output/
+artifacts/
+state/
+.DS_Store
