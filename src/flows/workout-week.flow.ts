@@ -20,7 +20,11 @@ function escapeRegExp(value: string): string {
 }
 
 function normalizeLabel(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+  return value
+    .replace(/[\u00a0\u200b\u200c\u200d]/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
 }
 
 async function clickByLabel(ctx: FlowContext, label: RegExp, labelName: string): Promise<void> {
@@ -99,15 +103,13 @@ async function findWorkoutTypeSelector(ctx: FlowContext): Promise<{
   height: number;
 } | null> {
   return ctx.page!.evaluate((dayLabels) => {
-    const host = document.querySelector('flt-semantics-host');
-    const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
-      ? (host as HTMLElement).shadowRoot
-      : host;
-    if (!root) {
-      return null;
-    }
+    const hosts = Array.from(document.querySelectorAll('flt-semantics-host'));
+    const roots = hosts.length
+      ? hosts.map((host) => ('shadowRoot' in host && (host as HTMLElement).shadowRoot
+        ? (host as HTMLElement).shadowRoot
+        : host))
+      : [document];
 
-    const nodes = root.querySelectorAll('[aria-label]');
     const candidates: {
       x: number;
       y: number;
@@ -118,45 +120,49 @@ async function findWorkoutTypeSelector(ctx: FlowContext): Promise<{
       height: number;
     }[] = [];
 
-    for (let i = 0; i < nodes.length; i += 1) {
-      const el = nodes[i] as HTMLElement;
-      const label = (el.getAttribute('aria-label') ?? '').trim();
-      if (!label) {
-        continue;
-      }
-      if (label.includes('/')) {
-        continue;
-      }
+    for (const root of roots) {
+      const nodes = root.querySelectorAll('[aria-label]');
 
-      const rect = el.getBoundingClientRect();
-      if (!rect || rect.height < 24 || rect.width < 50) {
-        continue;
-      }
+      for (let i = 0; i < nodes.length; i += 1) {
+        const el = nodes[i] as HTMLElement;
+        const label = (el.getAttribute('aria-label') ?? '').trim();
+        if (!label) {
+          continue;
+        }
+        if (label.includes('/')) {
+          continue;
+        }
 
-      if (rect.top < 0 || rect.top > window.innerHeight * 0.22) {
-        continue;
-      }
+        const rect = el.getBoundingClientRect();
+        if (!rect || rect.height < 24 || rect.width < 50) {
+          continue;
+        }
 
-      const normalized = label.toLowerCase();
-      if (normalized.includes('workout')) {
-        continue;
-      }
-      if (dayLabels.includes(normalized)) {
-        continue;
-      }
-      if (/^\d{1,2}$/.test(normalized)) {
-        continue;
-      }
+        if (rect.top < 0 || rect.top > window.innerHeight * 0.22) {
+          continue;
+        }
 
-      candidates.push({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-        label,
-        top: rect.top,
-        left: rect.left,
-        width: rect.width,
-        height: rect.height,
-      });
+        const normalized = label.toLowerCase();
+        if (normalized.includes('workout')) {
+          continue;
+        }
+        if (dayLabels.includes(normalized)) {
+          continue;
+        }
+        if (/^\d{1,2}$/.test(normalized)) {
+          continue;
+        }
+
+        candidates.push({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          label,
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        });
+      }
     }
 
     if (candidates.length === 0) {
@@ -243,44 +249,49 @@ async function openWorkoutTypeMenu(
 async function clickWorkoutTypeOption(ctx: FlowContext, workoutType: string): Promise<boolean> {
   const page = ctx.page!;
   const logger = ctx.logger;
-  const pattern = escapeRegExp(workoutType);
+  const normalizedTarget = normalizeLabel(workoutType);
+  const pattern = escapeRegExp(workoutType).replace(/\s+/g, '\\s*');
 
-  const match = await page.evaluate((patternText) => {
-    const host = document.querySelector('flt-semantics-host');
-    const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
-      ? (host as HTMLElement).shadowRoot
-      : host;
-    if (!root) {
-      return null;
-    }
+  const match = await page.evaluate((args) => {
+    const hosts = Array.from(document.querySelectorAll('flt-semantics-host'));
+    const roots = hosts.length
+      ? hosts.map((host) => ('shadowRoot' in host && (host as HTMLElement).shadowRoot
+        ? (host as HTMLElement).shadowRoot
+        : host))
+      : [document];
 
-    const regex = new RegExp(patternText, 'i');
-    const nodes = root.querySelectorAll('[aria-label]');
     const candidates: { x: number; y: number; label: string; top: number; left: number }[] = [];
 
-    for (let i = 0; i < nodes.length; i += 1) {
-      const el = nodes[i] as HTMLElement;
-      const label = (el.getAttribute('aria-label') ?? '').trim();
-      if (!label || !regex.test(label)) {
-        continue;
-      }
+    for (const root of roots) {
+      const nodes = root.querySelectorAll('[aria-label]');
+      for (let i = 0; i < nodes.length; i += 1) {
+        const el = nodes[i] as HTMLElement;
+        const label = (el.getAttribute('aria-label') ?? '').trim();
+        if (!label) {
+          continue;
+        }
+        const normalizedLabel = label
+          .replace(/[\u00a0\u200b\u200c\u200d]/g, ' ')
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, ' ');
+        if (!normalizedLabel || !normalizedLabel.includes(args.normalizedTarget)) {
+          continue;
+        }
 
-      const rect = el.getBoundingClientRect();
-      if (!rect || rect.height < 24 || rect.width < 50) {
-        continue;
-      }
+        const rect = el.getBoundingClientRect();
+        if (!rect || rect.height <= 0 || rect.width <= 0) {
+          continue;
+        }
 
-      if (rect.top < window.innerHeight * 0.1) {
-        continue;
+        candidates.push({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          label,
+          top: rect.top,
+          left: rect.left,
+        });
       }
-
-      candidates.push({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-        label,
-        top: rect.top,
-        left: rect.left,
-      });
     }
 
     if (candidates.length === 0) {
@@ -289,12 +300,41 @@ async function clickWorkoutTypeOption(ctx: FlowContext, workoutType: string): Pr
 
     candidates.sort((a, b) => a.top - b.top || a.left - b.left);
     return { x: candidates[0].x, y: candidates[0].y, label: candidates[0].label };
-  }, pattern);
+  }, { normalizedTarget });
 
   if (match) {
     logger.debug({ workoutType: match.label }, 'Selecting workout type');
     await page.mouse.click(match.x, match.y);
     return true;
+  }
+
+  const labelSnapshot = await page
+    .evaluate(() => {
+      const hosts = Array.from(document.querySelectorAll('flt-semantics-host'));
+      const roots = hosts.length
+        ? hosts.map((host) => ('shadowRoot' in host && (host as HTMLElement).shadowRoot
+          ? (host as HTMLElement).shadowRoot
+          : host))
+        : [document];
+      const labels = new Set<string>();
+      for (const root of roots) {
+        const nodes = root.querySelectorAll('[aria-label]');
+        for (let i = 0; i < nodes.length; i += 1) {
+          const label = (nodes[i] as HTMLElement).getAttribute('aria-label');
+          if (label) {
+            labels.add(label.trim());
+          }
+        }
+      }
+      return Array.from(labels);
+    })
+    .catch(() => []);
+
+  if (labelSnapshot.length > 0) {
+    logger.debug(
+      { total: labelSnapshot.length, sample: labelSnapshot.slice(0, 30) },
+      'Workout type labels snapshot'
+    );
   }
 
   try {

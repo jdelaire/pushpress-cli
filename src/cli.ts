@@ -19,6 +19,18 @@ function parseCliNumber(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeCliText(value: string | string[] | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const joined = value.join(' ').trim();
+    return joined.length > 0 ? joined : undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function applyRunOverrides(
   config: AppConfig,
   options: {
@@ -191,11 +203,11 @@ program
   .option('--pause', 'Pause before closing the browser')
   .option('--days <list>', 'Comma-separated days for schedule booking (e.g., mon,wed,fri)')
   .option('--time <time>', 'Time label to match (e.g., \"5:00 PM\")')
-  .option('--class <name>', 'Class name filter (default: CrossFit)')
-  .option('--type <name>', 'Class type filter (alias for --class)')
+  .option('--class <name...>', 'Class name filter (default: CrossFit)')
+  .option('--type <name...>', 'Class type filter (alias for --class)')
   .option('--category <name>', 'Schedule category (Classes/Appointments/Events/Reservations)')
   .option('--week <which>', 'Schedule week to target (current/next/2/3...)')
-  .option('--workout-type <name>', 'Workout type to select on the Workouts tab')
+  .option('--workout-type <name...>', 'Workout type to select on the Workouts tab')
   .option('--waitlist', 'Allow joining waitlists when class is full')
   .option('--confirm', 'Confirm and perform booking actions')
   .action(async (flowName, options) => {
@@ -234,13 +246,15 @@ program
 
       try {
         const capture = new NetworkCapture(session.page, logger);
+        const workoutTypeOption = normalizeCliText(options.workoutType);
+        const classOption = normalizeCliText(options.class) ?? normalizeCliText(options.type);
         const params: Record<string, string | undefined> = {
           days: options.days,
           time: options.time,
-          class: options.class ?? options.type,
+          class: classOption,
           category: options.category,
           week: options.week,
-          workoutType: options.workoutType,
+          workoutType: workoutTypeOption,
           waitlist: options.waitlist ? 'true' : 'false',
           confirm: options.confirm ? 'true' : 'false',
         };
@@ -271,7 +285,7 @@ program
         const durationMs = Date.now() - start;
 
         if (flow.name !== 'login') {
-          const workoutTypeParam = options.workoutType?.trim();
+          const workoutTypeParam = workoutTypeOption;
           const workoutTypeSlug =
             flow.name.startsWith('workout-') && workoutTypeParam ? slugify(workoutTypeParam) : '';
           const workoutTypeSuffix = workoutTypeSlug ? `-${workoutTypeSlug}` : '';

@@ -140,7 +140,7 @@ npx tsx src/cli.ts run workout-history --no-headless --verbose
 ```
 
 Optional:
-- `--workout-type <name>`: selects a workout type from the dropdown (e.g., `Bootcamp`, `HYROX`).
+- `--workout-type <name>`: selects a workout type from the dropdown (e.g., `Bootcamp`, `HYROX`; quote multi-word names like `"PRVN Pump"`).
   - When provided, output filenames include the workout type slug (e.g., `workout-history-201530-bootcamp.json`).
 
 Typical usage:
@@ -158,7 +158,7 @@ npx tsx src/cli.ts run workout-week --no-headless --verbose --pause
 ```
 
 Optional:
-- `--workout-type <name>`: selects a workout type from the dropdown (e.g., `PRVN Burn`).
+- `--workout-type <name>`: selects a workout type from the dropdown (e.g., `PRVN Burn`; quote multi-word names like `"PRVN Pump"`).
   - When provided, output filenames include the workout type slug (e.g., `workout-week-201530-prvn-burn.json`).
 
 This flow also writes a summary file grouped by day with only `title`, `description`, and `workoutTitle`, plus the detected date:
@@ -199,8 +199,8 @@ Optional:
 All known values:
 - `--days <list>`: comma/space separated day keys: `sun, mon, tue, wed, thu, fri, sat`
 - `--time <label>`: time label as shown in UI, e.g. `6:00 AM`, `5:00 PM`
-- `--class <name>`: class name label as shown in UI (default: `CrossFit`)
-- `--type <name>`: alias for `--class`
+- `--class <name>`: class name label as shown in UI (default: `CrossFit`; quote multi-word names like `"Olympic Lifting"`).
+- `--type <name>`: alias for `--class` (quote multi-word names).
 - `--category <name>`: one of `Reservations`, `Classes`, `Appointments`, `Events` (default: `Classes`)
 - `--week <which>`: `current`, `next`, or an integer offset like `2`, `3` (max 6)
 - `--waitlist`: allow waitlist-only booking
