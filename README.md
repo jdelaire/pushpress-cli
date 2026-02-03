@@ -1,4 +1,4 @@
-# CFCNX PushPress CLI
+# PushPress CLI
 
 A small CLI that automates the PushPress Members web app to:
 - Log in
@@ -24,6 +24,20 @@ Install Playwright browsers:
 npx playwright install
 ```
 
+## Quick Start
+
+1. Create a `.env` file (see Configuration below).
+2. Install dependencies and Playwright browsers.
+3. Run `list` to see available flows.
+4. Run a flow, optionally with `--no-headless --pause --verbose` for debugging.
+
+Example:
+
+```bash
+npx tsx src/cli.ts list
+npx tsx src/cli.ts run login --no-headless --pause --verbose
+```
+
 ## Configuration
 
 Create a `.env` file in the project root (or pass `--config <path>`):
@@ -38,6 +52,18 @@ OPENAI_API_KEY=your-openai-key
 Optional OpenAI settings (used for workout-week markdown summaries):
 - `OPENAI_MODEL`: default `gpt-3.5-turbo-16k`
 - `OPENAI_PROMPT_PATH`: any file path (default: `./prompts/workout-week-summary.md`)
+
+Example with a custom config file:
+
+```bash
+npx tsx src/cli.ts config --config ./envs/pushpress.env
+```
+
+Validate the config before running a flow:
+
+```bash
+npx tsx src/cli.ts config --config ./envs/pushpress.env --validate
+```
 
 ## Commands
 
@@ -82,6 +108,19 @@ All known values:
 - `--pause`: boolean flag
 - `--dry-run`: boolean flag (logs steps without executing)
 
+Common option patterns:
+
+```bash
+# Debug a flow with a visible browser and slower actions
+npx tsx src/cli.ts run workout-week --no-headless --slow-mo 250 --pause --verbose
+
+# Use a non-default config file
+npx tsx src/cli.ts run login --config ./envs/pushpress.env
+
+# Increase timeouts for slow networks
+npx tsx src/cli.ts run workout-history --timeout 60000 --verbose
+```
+
 ## Flows
 
 ### login
@@ -98,6 +137,12 @@ Extracts workout history (network capture) while on the Workouts tab.
 
 ```bash
 npx tsx src/cli.ts run workout-history --no-headless --verbose
+```
+
+Typical usage:
+
+```bash
+npx tsx src/cli.ts run workout-history --no-headless --verbose --pause
 ```
 
 ### workout-week
@@ -118,6 +163,18 @@ If `OPENAI_API_KEY` is set, it also writes a formatted markdown summary using th
 
 ```text
 output/workout-week/YYYY-MM-DD/workout-week-HHmmss-summary.md
+```
+
+Example: JSON only (no OpenAI key):
+
+```bash
+npx tsx src/cli.ts run workout-week --no-headless --verbose
+```
+
+Example: with OpenAI markdown summary:
+
+```bash
+OPENAI_API_KEY=your-openai-key npx tsx src/cli.ts run workout-week --no-headless --verbose
 ```
 
 ### schedule-book
@@ -163,6 +220,19 @@ Target next-next week:
 npx tsx src/cli.ts run schedule-book --week 2 --days fri --time "5:00 PM" --class "CrossFit" --confirm --no-headless --verbose --pause
 ```
 
+Common booking variations:
+
+```bash
+# Book a different class name and allow waitlist
+npx tsx src/cli.ts run schedule-book --days tue,thu --time "6:00 AM" --class "Olympic Lifting" --waitlist --confirm
+
+# Book from the Reservations category
+npx tsx src/cli.ts run schedule-book --category Reservations --days mon --time "12:00 PM" --confirm
+
+# Dry-run for a future week offset
+npx tsx src/cli.ts run schedule-book --week 3 --days fri --time "5:00 PM"
+```
+
 ## Output Files
 
 All flows (except `login`) write JSON output to:
@@ -175,6 +245,13 @@ For `schedule-book`, the output includes:
 - `data.bookings` for confirmed reservations
 - `data.matches` for dry-run matches
 - `data.attempts` for skipped or attempted bookings
+
+## Troubleshooting
+
+- If login fails, delete `state/session.json` and run `login` again.
+- If the UI is slow or flaky, use `--timeout 60000` and `--slow-mo 250`.
+- If the flow seems stuck, rerun with `--no-headless --pause --verbose` to inspect the browser state.
+- If OpenAI summaries fail, verify `OPENAI_API_KEY` and `OPENAI_PROMPT_PATH` (if set).
 
 ## Notes
 
