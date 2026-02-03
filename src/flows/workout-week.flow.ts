@@ -2,6 +2,7 @@ import { FlowContext, FlowDefinition } from '../types';
 
 const WORKOUTS_LABEL = /workouts/i;
 const DAY_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+const DAY_LABELS = new Set(DAY_ORDER);
 
 type DayKey = (typeof DAY_ORDER)[number];
 
@@ -12,6 +13,14 @@ interface DayButton {
   height: number;
   label: string;
   number: number;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 async function clickByLabel(ctx: FlowContext, label: RegExp, labelName: string): Promise<void> {
@@ -78,6 +87,251 @@ async function enableFlutterSemantics(ctx: FlowContext): Promise<void> {
 
   logger.debug({ clicked }, 'Flutter semantics placeholder click attempted');
   await page.waitForTimeout(250);
+}
+
+async function findWorkoutTypeSelector(ctx: FlowContext): Promise<{
+  x: number;
+  y: number;
+  label: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+} | null> {
+  return ctx.page!.evaluate((dayLabels) => {
+    const host = document.querySelector('flt-semantics-host');
+    const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
+      ? (host as HTMLElement).shadowRoot
+      : host;
+    if (!root) {
+      return null;
+    }
+
+    const nodes = root.querySelectorAll('[aria-label]');
+    const candidates: {
+      x: number;
+      y: number;
+      label: string;
+      top: number;
+      left: number;
+      width: number;
+      height: number;
+    }[] = [];
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i] as HTMLElement;
+      const label = (el.getAttribute('aria-label') ?? '').trim();
+      if (!label) {
+        continue;
+      }
+      if (label.includes('/')) {
+        continue;
+      }
+
+      const rect = el.getBoundingClientRect();
+      if (!rect || rect.height < 24 || rect.width < 50) {
+        continue;
+      }
+
+      if (rect.top < 0 || rect.top > window.innerHeight * 0.22) {
+        continue;
+      }
+
+      const normalized = label.toLowerCase();
+      if (normalized.includes('workout')) {
+        continue;
+      }
+      if (dayLabels.includes(normalized)) {
+        continue;
+      }
+      if (/^\d{1,2}$/.test(normalized)) {
+        continue;
+      }
+
+      candidates.push({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        label,
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    candidates.sort((a, b) => a.top - b.top || a.left - b.left);
+    return {
+      x: candidates[0].x,
+      y: candidates[0].y,
+      label: candidates[0].label,
+      left: candidates[0].left,
+      top: candidates[0].top,
+      width: candidates[0].width,
+      height: candidates[0].height,
+    };
+  }, Array.from(DAY_LABELS));
+}
+
+async function openWorkoutTypeMenu(
+  ctx: FlowContext,
+  selector?: { x: number; y: number; label: string; left: number; top: number; width: number; height: number } | null,
+  preferArrow = false
+): Promise<void> {
+  const page = ctx.page!;
+  const logger = ctx.logger;
+  const workoutType = ctx.params?.workoutType?.trim();
+
+  const exactLabels = [workoutType, 'CrossFit'].filter(
+    (value): value is string => Boolean(value)
+  );
+
+  for (const label of exactLabels) {
+    try {
+      await clickByLabel(ctx, new RegExp(`^\\s*${escapeRegExp(label)}\\s*$`, 'i'), label);
+      return;
+    } catch {
+      // continue
+    }
+  }
+
+  const candidate = selector ?? (await findWorkoutTypeSelector(ctx));
+
+  if (candidate) {
+    if (preferArrow) {
+      const arrowX =
+        candidate.left + candidate.width - Math.min(16, Math.max(8, candidate.width * 0.1));
+      const arrowY = candidate.top + candidate.height / 2;
+      logger.debug(
+        { label: candidate.label, arrowX: Math.round(arrowX), arrowY: Math.round(arrowY) },
+        'Opening workout type selector (arrow)'
+      );
+      await page.mouse.click(arrowX, arrowY);
+    } else {
+      logger.debug({ label: candidate.label }, 'Opening workout type selector (label)');
+      await page.mouse.click(candidate.x, candidate.y);
+    }
+    return;
+  }
+
+  const fallbackLabels = [ctx.params?.workoutType?.trim(), 'CrossFit'].filter(
+    (value): value is string => Boolean(value)
+  );
+
+  for (const label of fallbackLabels) {
+    try {
+      await clickByLabel(ctx, new RegExp(escapeRegExp(label), 'i'), label);
+      return;
+    } catch {
+      // continue
+    }
+  }
+
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  const fallbackX = Math.round(viewport.width * 0.94);
+  const fallbackY = Math.round(viewport.height * 0.12);
+  logger.debug(
+    { x: fallbackX, y: fallbackY, width: viewport.width, height: viewport.height },
+    'Falling back to coordinate click for workout type selector'
+  );
+  await page.mouse.click(fallbackX, fallbackY);
+}
+
+async function clickWorkoutTypeOption(ctx: FlowContext, workoutType: string): Promise<boolean> {
+  const page = ctx.page!;
+  const logger = ctx.logger;
+  const pattern = escapeRegExp(workoutType);
+
+  const match = await page.evaluate((patternText) => {
+    const host = document.querySelector('flt-semantics-host');
+    const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
+      ? (host as HTMLElement).shadowRoot
+      : host;
+    if (!root) {
+      return null;
+    }
+
+    const regex = new RegExp(patternText, 'i');
+    const nodes = root.querySelectorAll('[aria-label]');
+    const candidates: { x: number; y: number; label: string; top: number; left: number }[] = [];
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i] as HTMLElement;
+      const label = (el.getAttribute('aria-label') ?? '').trim();
+      if (!label || !regex.test(label)) {
+        continue;
+      }
+
+      const rect = el.getBoundingClientRect();
+      if (!rect || rect.height < 24 || rect.width < 50) {
+        continue;
+      }
+
+      if (rect.top < window.innerHeight * 0.1) {
+        continue;
+      }
+
+      candidates.push({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        label,
+        top: rect.top,
+        left: rect.left,
+      });
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    candidates.sort((a, b) => a.top - b.top || a.left - b.left);
+    return { x: candidates[0].x, y: candidates[0].y, label: candidates[0].label };
+  }, pattern);
+
+  if (match) {
+    logger.debug({ workoutType: match.label }, 'Selecting workout type');
+    await page.mouse.click(match.x, match.y);
+    return true;
+  }
+
+  try {
+    await clickByLabel(ctx, new RegExp(pattern, 'i'), workoutType);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function selectWorkoutType(ctx: FlowContext): Promise<void> {
+  const workoutType = ctx.params?.workoutType?.trim();
+  if (!workoutType) {
+    return;
+  }
+
+  const selector = await findWorkoutTypeSelector(ctx);
+  if (selector && normalizeLabel(selector.label) === normalizeLabel(workoutType)) {
+    ctx.logger.debug({ workoutType }, 'Workout type already selected');
+    return;
+  }
+
+  await openWorkoutTypeMenu(ctx, selector);
+  await ctx.page!.waitForTimeout(500);
+
+  let selected = await clickWorkoutTypeOption(ctx, workoutType);
+  if (!selected) {
+    await openWorkoutTypeMenu(ctx, selector, true);
+    await ctx.page!.waitForTimeout(500);
+    selected = await clickWorkoutTypeOption(ctx, workoutType);
+  }
+
+  if (!selected) {
+    throw new Error(`Workout type "${workoutType}" not found.`);
+  }
+
+  await ctx.page!.waitForTimeout(1200);
 }
 
 async function findWeekdayButtons(ctx: FlowContext): Promise<DayButton[]> {
@@ -286,6 +540,13 @@ export const workoutWeekFlow: FlowDefinition = {
       action: async (ctx) => {
         await clickByLabel(ctx, WORKOUTS_LABEL, 'Workouts');
         await ctx.page!.waitForTimeout(1500);
+      },
+    },
+    {
+      name: 'select-workout-type',
+      description: 'Select the requested workout type (if provided).',
+      action: async (ctx) => {
+        await selectWorkoutType(ctx);
       },
     },
     ...daySteps,

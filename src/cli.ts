@@ -53,6 +53,16 @@ function isMissingBrowserError(error: unknown): boolean {
   return message.includes('executable doesn') || message.includes('playwright install');
 }
 
+function slugify(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[^\x00-\x7F]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 async function waitForEnter(): Promise<void> {
   if (!process.stdin.isTTY) {
     return;
@@ -185,6 +195,7 @@ program
   .option('--type <name>', 'Class type filter (alias for --class)')
   .option('--category <name>', 'Schedule category (Classes/Appointments/Events/Reservations)')
   .option('--week <which>', 'Schedule week to target (current/next/2/3...)')
+  .option('--workout-type <name>', 'Workout type to select on the Workouts tab')
   .option('--waitlist', 'Allow joining waitlists when class is full')
   .option('--confirm', 'Confirm and perform booking actions')
   .action(async (flowName, options) => {
@@ -229,6 +240,7 @@ program
           class: options.class ?? options.type,
           category: options.category,
           week: options.week,
+          workoutType: options.workoutType,
           waitlist: options.waitlist ? 'true' : 'false',
           confirm: options.confirm ? 'true' : 'false',
         };
@@ -259,6 +271,10 @@ program
         const durationMs = Date.now() - start;
 
         if (flow.name !== 'login') {
+          const workoutTypeParam = options.workoutType?.trim();
+          const workoutTypeSlug =
+            flow.name.startsWith('workout-') && workoutTypeParam ? slugify(workoutTypeParam) : '';
+          const workoutTypeSuffix = workoutTypeSlug ? `-${workoutTypeSlug}` : '';
           const now = new Date();
           const envelope = {
             meta: {
@@ -276,7 +292,13 @@ program
             errors: [],
           };
 
-          const outputPath = writeOutputWithSuffix(config, flow.name, envelope, '', now);
+          const outputPath = writeOutputWithSuffix(
+            config,
+            flow.name,
+            envelope,
+            workoutTypeSuffix,
+            now
+          );
           logger.info({ outputPath }, 'Output written');
 
           if (flow.name === 'workout-week') {
@@ -300,7 +322,7 @@ program
               config,
               flow.name,
               summaryEnvelope,
-              '-summary',
+              `${workoutTypeSuffix}-summary`,
               now
             );
             logger.info({ summaryPath }, 'Summary output written');
@@ -315,7 +337,7 @@ program
                 config,
                 flow.name,
                 markdown,
-                '-summary',
+                `${workoutTypeSuffix}-summary`,
                 '.md',
                 now
               );

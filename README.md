@@ -139,6 +139,10 @@ Extracts workout history (network capture) while on the Workouts tab.
 npx tsx src/cli.ts run workout-history --no-headless --verbose
 ```
 
+Optional:
+- `--workout-type <name>`: selects a workout type from the dropdown (e.g., `Bootcamp`, `HYROX`).
+  - When provided, output filenames include the workout type slug (e.g., `workout-history-201530-bootcamp.json`).
+
 Typical usage:
 
 ```bash
@@ -153,16 +157,22 @@ Clicks each day in the week and captures workouts for all days. Output includes 
 npx tsx src/cli.ts run workout-week --no-headless --verbose --pause
 ```
 
+Optional:
+- `--workout-type <name>`: selects a workout type from the dropdown (e.g., `PRVN Burn`).
+  - When provided, output filenames include the workout type slug (e.g., `workout-week-201530-prvn-burn.json`).
+
 This flow also writes a summary file grouped by day with only `title`, `description`, and `workoutTitle`, plus the detected date:
 
 ```text
 output/workout-week/YYYY-MM-DD/workout-week-HHmmss-summary.json
+output/workout-week/YYYY-MM-DD/workout-week-HHmmss-<workout-type>-summary.json
 ```
 
 If `OPENAI_API_KEY` is set, it also writes a formatted markdown summary using the prompt in `./prompts/workout-week-summary.md`:
 
 ```text
 output/workout-week/YYYY-MM-DD/workout-week-HHmmss-summary.md
+output/workout-week/YYYY-MM-DD/workout-week-HHmmss-<workout-type>-summary.md
 ```
 
 Example: JSON only (no OpenAI key):
