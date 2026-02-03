@@ -203,6 +203,37 @@ async function clickDayByIndex(ctx: FlowContext, index: number, dayKey: DayKey):
   await ctx.page!.mouse.click(x, y);
 }
 
+async function waitForWorkoutOfDayResponse(ctx: FlowContext, dayKey: DayKey): Promise<boolean> {
+  const page = ctx.page!;
+  const logger = ctx.logger;
+  const timeoutMs = Math.max(15000, Math.min(45000, ctx.config.globalTimeout));
+
+  try {
+    await page.waitForResponse(
+      (response) => {
+        const url = response.url();
+        if (!url.includes('graphql')) {
+          return false;
+        }
+        if (response.request().method().toUpperCase() !== 'POST') {
+          return false;
+        }
+        const postData = response.request().postData() || '';
+        if (!postData.includes('workoutOfDay')) {
+          return false;
+        }
+        return response.status() === 200;
+      },
+      { timeout: timeoutMs }
+    );
+    logger.debug({ dayKey }, 'Captured workoutOfDay response');
+    return true;
+  } catch {
+    logger.warn({ dayKey, timeoutMs }, 'Timed out waiting for workoutOfDay response');
+    return false;
+  }
+}
+
 const daySteps = DAY_ORDER.map((dayKey, index) => ({
   name: `capture-${dayKey}`,
   description: `Capture workouts for ${dayKey}.`,
@@ -225,7 +256,8 @@ const daySteps = DAY_ORDER.map((dayKey, index) => ({
   ],
   action: async (ctx: FlowContext) => {
     await clickDayByIndex(ctx, index, dayKey);
-    await ctx.page!.waitForTimeout(6000);
+    await waitForWorkoutOfDayResponse(ctx, dayKey);
+    await ctx.page!.waitForTimeout(2500);
   },
 }));
 

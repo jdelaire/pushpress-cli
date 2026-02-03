@@ -1,4 +1,4 @@
-# Agent Prompt - Extract + Format PushPress Week Summary (Filtered)
+# Agent Prompt — Extract + Format PushPress Week Summary (Filtered)
 
 You are a coding agent. Your job is to implement a deterministic transformation that takes a PushPress JSON export (workout-week-summary flow) and outputs a clean Markdown file containing only the relevant training pieces.
 
@@ -18,6 +18,7 @@ Produce a single Markdown document:
 - For each day, include only sections we care about (Strength, Weightlifting, Conditioning, Optional Accessories, etc.)
 - Exclude: warmups, mobility, and levels variants
 - Pretty format descriptions into readable Markdown lines
+- Do not wrap the output in Markdown code fences (no ```markdown or ```).
 
 This is a pure transformation. No network calls. No UI automation. No guessing.
 
@@ -32,7 +33,7 @@ Exclude an item if any of the following is true:
    - "Warm-Up"
 2. title contains (case-insensitive) the substring:
    - "levels"
-   Examples: [Levels: "The One"], [Levels"Open 13.4"], [Levels :"John Wick"]
+   Examples: `[Levels: "The One"]`, `[Levels"Open 13.4"]`, `[Levels :"John Wick"]`
 3. title equals (case-insensitive):
    - "Mobility"
 
@@ -134,7 +135,7 @@ Given the provided JSON example, the output must contain:
 - Tue: Strength/Stability, Speed, Optional Accessories
 - No Warm-Up Flow blocks
 - No Mobility blocks
-- No [Levels: ...] blocks
-- No standalone movement titles like Couch Stretch or Bird-Dog Rows
+- No `[Levels: ...]` blocks
+- No standalone movement titles like `Couch Stretch` or `Bird-Dog Rows`
 
 generated_json_summary
