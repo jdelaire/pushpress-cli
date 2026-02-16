@@ -15,6 +15,27 @@ function buildPrompt(template: string, summaryEnvelope: unknown): string {
   return `${template.trim()}\n\n${summaryJson}`;
 }
 
+function dedupeAdjacentMarkdownLines(markdown: string): string {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const cleaned: string[] = [];
+  let previousComparable: string | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isHeading = /^#{1,6}\s/.test(trimmed);
+    const comparable = !trimmed || isHeading ? null : trimmed.toLowerCase().replace(/\s+/g, ' ');
+
+    if (comparable && comparable === previousComparable) {
+      continue;
+    }
+
+    cleaned.push(line);
+    previousComparable = comparable;
+  }
+
+  return cleaned.join('\n').trimEnd();
+}
+
 export async function generateWorkoutWeekMarkdown(
   config: AppConfig,
   summaryEnvelope: unknown,
@@ -49,5 +70,5 @@ export async function generateWorkoutWeekMarkdown(
     throw new Error('OpenAI response was empty.');
   }
 
-  return content;
+  return dedupeAdjacentMarkdownLines(content);
 }

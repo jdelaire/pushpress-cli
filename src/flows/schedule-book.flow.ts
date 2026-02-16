@@ -1066,6 +1066,39 @@ async function hasBookingAction(ctx: FlowContext): Promise<boolean> {
   }, labels);
 }
 
+async function hasJoinWaitlistAction(ctx: FlowContext): Promise<boolean> {
+  const page = ctx.page!;
+  const semanticsMatch = await page.evaluate(() => {
+    const host = document.querySelector('flt-semantics-host');
+    const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
+      ? (host as HTMLElement).shadowRoot
+      : host;
+    if (!root) {
+      return false;
+    }
+
+    const actionWords = ['join', 'reserve', 'book', 'sign up', 'register'];
+    const nodes = root.querySelectorAll('[aria-label]');
+    for (let i = 0; i < nodes.length; i += 1) {
+      const label = ((nodes[i] as HTMLElement).getAttribute('aria-label') ?? '').toLowerCase();
+      if (!label.includes('waitlist')) {
+        continue;
+      }
+      if (actionWords.some((word) => label.includes(word))) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  if (semanticsMatch) {
+    return true;
+  }
+
+  return hasVisibleText(ctx, /(join|book|reserve|register).*(waitlist)|waitlist.*(join|book|reserve|register)/i);
+}
+
 async function hasVisibleText(ctx: FlowContext, pattern: RegExp): Promise<boolean> {
   const page = ctx.page!;
   const locators = [
@@ -1338,7 +1371,7 @@ async function clickBookingAction(ctx: FlowContext): Promise<void> {
   const logger = ctx.logger;
   const config = ctx.config;
 
-  const labels = [/reserve/i, /book/i, /sign up/i, /join/i, /register/i];
+  const labels = [/reserve/i, /book/i, /sign up/i, /join/i, /register/i, /waitlist/i];
   const perAttemptTimeout = Math.min(2000, config.globalTimeout);
 
   for (const label of labels) {
@@ -1698,6 +1731,7 @@ export const scheduleBookFlow: FlowDefinition = {
             }
 
             if (!allowWaitlist) {
+              const hasJoinWaitlist = await hasJoinWaitlistAction(ctx);
               const waitlistOnly = await ctx.page!.evaluate(() => {
                 const host = document.querySelector('flt-semantics-host');
                 const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
@@ -1717,7 +1751,7 @@ export const scheduleBookFlow: FlowDefinition = {
                 }
                 return false;
               });
-              if (waitlistOnly) {
+              if (waitlistOnly && !hasJoinWaitlist) {
                 ctx.logger.info({ day, label: slot.label }, 'Skipping waitlist-only slot');
                 await closeDetails(ctx);
                 (ctx.flowData.attempts as BookingRecord[]).push({
@@ -1735,6 +1769,9 @@ export const scheduleBookFlow: FlowDefinition = {
                   await basePage.waitForTimeout(300);
                 }
                 continue;
+              }
+              if (waitlistOnly && hasJoinWaitlist) {
+                ctx.logger.info({ day, label: slot.label }, 'Join-waitlist action detected; proceeding');
               }
             }
 
