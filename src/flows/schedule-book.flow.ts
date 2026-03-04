@@ -2,6 +2,20 @@ import { FlowContext, FlowDefinition } from '../types';
 
 const SCHEDULE_LABEL = /schedule/i;
 const DAY_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+const MONTH_NAMES = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+] as const;
 
 type DayKey = (typeof DAY_ORDER)[number];
 
@@ -33,6 +47,15 @@ interface BookingRecord {
   label: string;
   status: 'reserved' | 'waitlisted' | 'attempted' | 'skipped' | 'unavailable' | 'unknown';
   note?: string;
+}
+
+interface PickerMonthInfo {
+  month: number;
+  year: number;
+  label: string;
+  x: number;
+  y: number;
+  top: number;
 }
 
 function escapeRegExp(value: string): string {
@@ -691,21 +714,7 @@ async function clickNextWeekToggle(ctx: FlowContext): Promise<boolean> {
 }
 
 function formatDateCandidates(date: Date): RegExp[] {
-  const monthNames = [
-    'january',
-    'february',
-    'march',
-    'april',
-    'may',
-    'june',
-    'july',
-    'august',
-    'september',
-    'october',
-    'november',
-    'december',
-  ];
-  const month = monthNames[date.getMonth()];
+  const month = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const year = date.getFullYear();
   return [
@@ -715,10 +724,14 @@ function formatDateCandidates(date: Date): RegExp[] {
   ];
 }
 
-async function selectDateInPicker(ctx: FlowContext, date: Date): Promise<boolean> {
+function toMonthIndex(month: number, year: number): number {
+  return year * 12 + month;
+}
+
+async function findDateInPicker(ctx: FlowContext, date: Date): Promise<{ x: number; y: number } | null> {
   const page = ctx.page!;
   const patterns = formatDateCandidates(date);
-  const found = await page.evaluate((regexSources) => {
+  return page.evaluate((regexSources) => {
     const host = document.querySelector('flt-semantics-host');
     const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
       ? (host as HTMLElement).shadowRoot
@@ -760,14 +773,158 @@ async function selectDateInPicker(ctx: FlowContext, date: Date): Promise<boolean
     }
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   }, patterns.map((pattern) => pattern.source));
+}
 
-  if (!found) {
+async function getVisiblePickerMonth(ctx: FlowContext): Promise<PickerMonthInfo | null> {
+  const page = ctx.page!;
+  return page.evaluate(({ monthNames, dayNames }) => {
+    const host = document.querySelector('flt-semantics-host');
+    const root = host && 'shadowRoot' in host && (host as HTMLElement).shadowRoot
+      ? (host as HTMLElement).shadowRoot
+      : host;
+    if (!root) {
+      return null as null | PickerMonthInfo;
+    }
+
+    const headingPattern = new RegExp(`^\\s*(${monthNames.join('|')})\\s+\\d{4}\\s*$`, 'i');
+    const nodes = root.querySelectorAll('[aria-label]');
+    let best: null | PickerMonthInfo & { score: number } = null;
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i] as HTMLElement;
+      const label = (el.getAttribute('aria-label') ?? '').trim();
+      if (!label) {
+        continue;
+      }
+      const normalized = label.toLowerCase();
+      const month = monthNames.findIndex((name) => normalized.includes(name));
+      const yearMatch = normalized.match(/\b20\d{2}\b/);
+      if (month < 0 || !yearMatch) {
+        continue;
+      }
+
+      const rect = el.getBoundingClientRect();
+      if (!rect || rect.width < 48 || rect.height < 12) {
+        continue;
+      }
+      if (rect.bottom < 0 || rect.top > window.innerHeight * 0.55) {
+        continue;
+      }
+
+      const hasDayName = dayNames.some((name) => normalized.includes(name));
+      let score = 0;
+      if (headingPattern.test(normalized)) score += 8;
+      if (!hasDayName) score += 4;
+      if (!normalized.includes(',')) score += 2;
+      if (rect.top < window.innerHeight * 0.35) score += 2;
+
+      if (!best || score > best.score) {
+        best = {
+          month,
+          year: Number(yearMatch[0]),
+          label,
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          top: rect.top,
+          score,
+        };
+      }
+    }
+
+    if (!best) {
+      return null as null | PickerMonthInfo;
+    }
+
+    return {
+      month: best.month,
+      year: best.year,
+      label: best.label,
+      x: best.x,
+      y: best.y,
+      top: best.top,
+    };
+  }, { monthNames: [...MONTH_NAMES], dayNames: [...DAY_ORDER] });
+}
+
+async function clickPickerNextMonth(ctx: FlowContext, monthInfo: PickerMonthInfo | null): Promise<boolean> {
+  const page = ctx.page!;
+  const viewport = page.viewportSize();
+  if (!viewport) {
     return false;
   }
 
-  await page.mouse.click(found.x, found.y);
-  await page.waitForTimeout(800);
-  return true;
+  const yBase = monthInfo?.y ?? Math.max(60, Math.round(viewport.height * 0.15));
+  const yCandidates = [yBase, yBase - 14, yBase + 14];
+  const xCandidates = [viewport.width - 28, viewport.width - 44, viewport.width - 60];
+
+  for (const y of yCandidates) {
+    for (const x of xCandidates) {
+      if (x <= 0 || y <= 0 || x >= viewport.width || y >= viewport.height) {
+        continue;
+      }
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(450);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function waitForPickerMonthChange(
+  ctx: FlowContext,
+  before: PickerMonthInfo,
+  timeoutMs: number
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const current = await getVisiblePickerMonth(ctx);
+    if (current && (current.month !== before.month || current.year !== before.year)) {
+      return true;
+    }
+    await ctx.page!.waitForTimeout(150);
+  }
+  return false;
+}
+
+async function selectDateInPicker(ctx: FlowContext, date: Date): Promise<boolean> {
+  const page = ctx.page!;
+  const targetMonthIndex = toMonthIndex(date.getMonth(), date.getFullYear());
+  const maxMonthAdvances = 8;
+
+  for (let step = 0; step <= maxMonthAdvances; step += 1) {
+    const found = await findDateInPicker(ctx, date);
+    if (found) {
+      await page.mouse.click(found.x, found.y);
+      await page.waitForTimeout(800);
+      return true;
+    }
+
+    const visibleMonth = await getVisiblePickerMonth(ctx);
+    if (visibleMonth) {
+      const visibleMonthIndex = toMonthIndex(visibleMonth.month, visibleMonth.year);
+      if (visibleMonthIndex >= targetMonthIndex) {
+        return false;
+      }
+    }
+
+    if (step === maxMonthAdvances) {
+      return false;
+    }
+
+    const moved = await clickPickerNextMonth(ctx, visibleMonth);
+    if (!moved) {
+      return false;
+    }
+
+    if (visibleMonth) {
+      await waitForPickerMonthChange(ctx, visibleMonth, 2500);
+    } else {
+      await page.waitForTimeout(700);
+    }
+  }
+
+  return false;
 }
 
 async function findTimeSlots(
